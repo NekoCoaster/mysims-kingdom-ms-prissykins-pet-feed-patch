@@ -57,7 +57,7 @@ try {
     $record | ConvertTo-Json | Set-Content -LiteralPath $manifest -Encoding UTF8
     [IO.File]::WriteAllBytes($path, $bytes)
     if ((Get-FileHash -LiteralPath $path).Hash -ne $record.InstalledHash) { throw 'Installation verification failed. The original file is in CatAnimal.lua.prissykins-backup.' }
-    Write-Host 'Installed and backed up the original script. Start the game, stand beside Ms. Prissykins, then run Enable Petting.cmd.' -ForegroundColor Green
+    Write-Host 'Script installed and backed up. Make sure this mod''s winmm.dll is beside MySimsKingdom.exe, then start the game normally through Steam.' -ForegroundColor Green
 } catch {
     Write-Host $_.Exception.GetBaseException().Message -ForegroundColor Red
     Write-Host 'If Windows denied access to the game folder, use Run as administrator on the installer.'

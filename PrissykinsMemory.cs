@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Collections.Generic;
+using System.Threading;
 
 // Build-specific, data-only registration. No injected code and no save access.
 public static class PrissykinsMemory
@@ -76,6 +78,116 @@ public static class PrissykinsMemory
         byte[] list = m.Read(first, checked((int)(last - first)));
         for (int i = 0; i < list.Length; i += 4) if (BitConverter.ToUInt32(list, i) == target) return true;
         return false;
+    }
+
+    // Wait for a stable posted voice rather than trying to observe the two
+    // selections that occur within one native call. No executable code is patched.
+    public sealed class VoiceCycle
+    {
+        readonly Dictionary<ulong, long> firstSeen = new Dictionary<ulong, long>();
+        readonly HashSet<ulong> handled = new HashSet<ulong>();
+        readonly Queue<ulong> history = new Queue<ulong>();
+        public bool Ready(ulong identity, long milliseconds)
+        {
+            if (handled.Contains(identity)) return false;
+            long start;
+            if (!firstSeen.TryGetValue(identity, out start))
+            {
+                firstSeen.Add(identity, milliseconds);
+                history.Enqueue(identity);
+                if (history.Count > 256)
+                {
+                    ulong old = history.Dequeue();
+                    firstSeen.Remove(old); handled.Remove(old);
+                }
+                return false;
+            }
+            return milliseconds - start >= 80;
+        }
+        public void MarkHandled(ulong identity) { handled.Add(identity); }
+    }
+
+    public static void VarySounds(int pid)
+    {
+        if (IntPtr.Size != 8) throw new Exception("Use 64-bit Windows PowerShell.");
+        bool ownsMutex;
+        using (Mutex single = new Mutex(true, "Local\\PrissykinsSoundVariation-" + pid, out ownsMutex))
+        {
+            if (!ownsMutex) throw new Exception("Sound variation is already running for this game.");
+            try
+            {
+                using (Process process = Process.GetProcessById(pid))
+                {
+                    using (SHA256 sha = SHA256.Create())
+                    using (FileStream file = File.OpenRead(process.MainModule.FileName))
+                        if (BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "") != SupportedSha256)
+                            throw new Exception("Unsupported game executable. Sound variation was not enabled.");
+                    ulong module = (ulong)process.MainModule.BaseAddress.ToInt64();
+                    using (Memory m = new Memory(pid, false))
+                    {
+                        ulong manager = m.U64(module + 0xae97a8);
+                        if (m.U64(manager) != module + 0x910820 || m.U32(manager + 0x50) != 5837 || m.U32(manager + 0x60) != 5837)
+                            throw new Exception("Unexpected audio layout. Sound variation was not enabled.");
+                        ulong names = m.U64(manager + 0x48), settings = m.U64(manager + 0x58);
+                        uint[] keys = { 0x479c95c0, 0x46c8d125 };
+                        uint[] banks = { 253, 250 };
+                        string[] labels = { "Pet", "Feed" };
+                        ulong[] rows = new ulong[2];
+                        byte[] table = m.Read(names, 5837 * 16);
+                        for (int i = 0; i < 5837; i++)
+                            for (int kind = 0; kind < 2; kind++)
+                                if (BitConverter.ToUInt32(table, i * 16) == keys[kind])
+                                {
+                                    if (rows[kind] != 0 || BitConverter.ToUInt32(table, i * 16 + 4) != banks[kind] || BitConverter.ToUInt32(table, i * 16 + 8) != 2)
+                                        throw new Exception("Unexpected cat sound group.");
+                                    rows[kind] = names + (ulong)i * 16;
+                                }
+                        if (rows[0] == 0 || rows[1] == 0) throw new Exception("Cat sound groups were not found.");
+                        VoiceCycle cycle = new VoiceCycle();
+                        Stopwatch clock = Stopwatch.StartNew();
+                        Console.WriteLine("READY: Pet and Feed sound variation is running. Keep this helper running; close it to stop.");
+                        while (!process.HasExited)
+                        {
+                            if (m.U64(module + 0xae97a8) != manager || m.U64(manager + 0x48) != names || m.U64(manager + 0x58) != settings)
+                                throw new Exception("Audio system changed. Restart the helper after loading finishes.");
+                            byte[] voices = m.Read(manager + 0x68, 48 * 0x70);
+                            for (int slot = 0; slot < 48; slot++)
+                            {
+                                int offset = slot * 0x70;
+                                uint playing = BitConverter.ToUInt32(voices, offset);
+                                if (playing == 0 || playing == UInt32.MaxValue) continue;
+                                ulong sound = BitConverter.ToUInt64(voices, offset + 8);
+                                for (int kind = 0; kind < 2; kind++)
+                                {
+                                    if (sound != settings + banks[kind] * 56UL) continue;
+                                    ulong identity = BitConverter.ToUInt64(voices, offset + 0x18);
+                                    if (identity == 0 || !cycle.Ready(identity, clock.ElapsedMilliseconds)) continue;
+                                    ulong voiceAddress = manager + 0x68 + (ulong)offset;
+                                    byte[] live = m.Read(voiceAddress, 32);
+                                    if (BitConverter.ToUInt32(live, 0) != playing || BitConverter.ToUInt64(live, 8) != sound || BitConverter.ToUInt64(live, 0x18) != identity) continue;
+                                    byte[] row = m.Read(rows[kind], 16);
+                                    if (BitConverter.ToUInt32(row, 0) != keys[kind] || BitConverter.ToUInt32(row, 4) != banks[kind] || BitConverter.ToUInt32(row, 8) != 2)
+                                        throw new Exception("Cat sound group changed; sound variation stopped.");
+                                    int current = BitConverter.ToInt32(row, 12);
+                                    if (current != 0 && current != 1) continue;
+                                    // The event has already been posted. Changing this field only
+                                    // affects the next selection, not the recording currently playing.
+                                    if (!Same(live, m.Read(voiceAddress, 32)) || !Same(row, m.Read(rows[kind], 16))) continue;
+                                    m.Write(rows[kind] + 12, BitConverter.GetBytes(1 - current));
+                                    cycle.MarkHandled(identity);
+                                    if (m.U32(rows[kind] + 12) != 1 - current)
+                                        throw new Exception("Sound selection changed during the update. Sound variation stopped.");
+                                    Console.WriteLine(labels[kind] + ": recording " + (current + 1) + " playing; recording " + (2 - current) + " prepared for next time.");
+                                }
+                            }
+                            Thread.Sleep(10);
+                        }
+                        Console.WriteLine("Game closed. Sound variation stopped.");
+                    }
+                }
+            }
+            finally { single.ReleaseMutex(); }
+        }
     }
 
     public static string Run(int pid, bool checkOnly)

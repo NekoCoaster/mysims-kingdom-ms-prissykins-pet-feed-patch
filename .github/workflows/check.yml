@@ -1,4 +1,4 @@
-name: Check helper
+name: Check mod
 on: [push, pull_request]
 jobs:
   windows:
@@ -11,3 +11,26 @@ jobs:
       - name: Check installer and restoration
         shell: powershell
         run: .\tests\Test-Installer.ps1
+      - name: Check sound-cycle tracking
+        shell: powershell
+        run: .\tests\Test-SoundCycle.ps1
+      - name: Get verified Zig toolchain
+        shell: powershell
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip").Hash -ne '3A0ED1E8799A2F8CE2A6E6290A9FF22E6906F8227865911FB7DDEDC3CC14CB0C') { throw 'Toolchain hash mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/zig.zip" "$env:RUNNER_TEMP/zig"
+      - name: Build and check proxy
+        shell: powershell
+        run: |
+          $zig = "$env:RUNNER_TEMP/zig/zig-x86_64-windows-0.15.2/zig.exe"
+          .\native\Build-Proxy.ps1 -ZigPath $zig
+          & $zig c++ -target x86_64-windows-gnu -std=c++17 -O2 -static native/test_logic.cpp -lbcrypt -o native/build/test_logic.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
+          & ./native/build/test_logic.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Logic test failed' }
+          python -m pip install pefile==2024.8.26
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          python native/test_forwarding.py
+          if ($LASTEXITCODE -ne 0) { throw 'Forwarding test failed' }
+          .\Build-Release.ps1

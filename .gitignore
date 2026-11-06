@@ -6,3 +6,7 @@
 *.prissykins-install.json
 test-results/
 dist/
+native/build/
+native/forwarders.S
+native/exports.inc
+native/winmm.def
