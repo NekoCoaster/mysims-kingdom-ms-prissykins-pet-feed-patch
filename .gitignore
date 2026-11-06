@@ -1,0 +1,8 @@
+*.zip
+*.sav
+*.exe
+*.dll
+*.prissykins-backup
+*.prissykins-install.json
+test-results/
+dist/

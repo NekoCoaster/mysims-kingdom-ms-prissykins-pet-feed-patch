@@ -1,0 +1,13 @@
+name: Check helper
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile memory helper
+        shell: powershell
+        run: Add-Type -Path .\PrissykinsMemory.cs
+      - name: Check installer and restoration
+        shell: powershell
+        run: .\tests\Test-Installer.ps1
