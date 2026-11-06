@@ -17,6 +17,7 @@ jobs:
       - name: Get verified Zig toolchain
         shell: powershell
         run: |
+          $ProgressPreference = 'SilentlyContinue'
           Invoke-WebRequest https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
           if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip").Hash -ne '3A0ED1E8799A2F8CE2A6E6290A9FF22E6906F8227865911FB7DDEDC3CC14CB0C') { throw 'Toolchain hash mismatch' }
           Expand-Archive "$env:RUNNER_TEMP/zig.zip" "$env:RUNNER_TEMP/zig"

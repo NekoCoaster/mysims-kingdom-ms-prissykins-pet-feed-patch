@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$ZigPath)
 $ErrorActionPreference='Stop'
-$exports = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'winmm-exports.json') -Raw | ConvertFrom-Json)
+# Windows PowerShell 5.1 emits the entire JSON array as one pipeline object.
+# Assign it directly so an outer @() does not wrap it in a second array.
+$exports = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'winmm-exports.json') -Raw)
+if ($exports.Count -ne 181) { throw 'Expected 181 WinMM export records.' }
 $asm = [Collections.Generic.List[string]]::new()
 $defs = [Collections.Generic.List[string]]::new()
 $names = [Collections.Generic.List[string]]::new()
