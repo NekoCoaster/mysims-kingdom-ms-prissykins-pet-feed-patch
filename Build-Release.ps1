@@ -3,7 +3,8 @@ param([string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'))
 $ErrorActionPreference = 'Stop'
 $files = @(
     'README.md', 'LICENSE', 'Install.ps1', 'Install.cmd', 'Uninstall.cmd',
-    'docs/images/prissykins-petting-demo.gif', 'winmm.dll'
+    'docs/images/prissykins-petting-demo.gif', 'winmm.dll',
+    'third-party/Zig-LICENSE.txt', 'third-party/LLVM-LICENSE.txt', 'third-party/MinGW-COPYING.txt'
 )
 $dll = Join-Path $PSScriptRoot 'native/build/winmm.dll'
 if (-not (Test-Path -LiteralPath $dll)) { throw 'Build the proxy DLL with native/Build-Proxy.ps1 first.' }
