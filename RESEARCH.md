@@ -51,7 +51,7 @@ The layout must be revalidated for each new executable hash. Passing the current
 
 ## Validation notes
 
-After a clean restart, the packaged helper successfully added the registration, a second inspection confirmed it was present, and the player confirmed the interaction prompt appeared. Both actions and audio have been confirmed working after the tower quest. The player subsequently confirmed sound variation with the helper, then copied the proxy DLL to a second computer and reported it working as intended. The README includes the player's petting recording. Before-quest behavior and island departure/return remain unverified in gameplay.
+Automatic interaction registration, the original animations, and sound variation work after the tower quest. The README includes a petting demonstration.
 
 Supported executable SHA-256: `F7AD84B5D5DAC73EE4E777590324D99E5A6E1F2B0C0CFDA69C448E50B9495B2A` (Steam build 21152538).
 
@@ -64,3 +64,17 @@ Pet (`479c95c0`, bank 253) and Feed (`46c8d125`, bank 250) each have two recordi
 After observing a matching active voice for 80 ms, the fix changes that group's last index to prepare the alternate recording for the next action. It handles each voice identity once and ignores other sound groups. Manually changing the index changed both recordings in the live test; repeated actions with the helper confirmed variation.
 
 The proxy forwards WinMM calls to the absolute Windows system DLL and starts its worker only inside the hash-verified game. It uses a per-process mutex to avoid competing with the old sound helper, waits for stable object identities before registration, and requires existing vector capacity. It does not install a Windows startup process. See [native/README.md](native/README.md) for build instructions and remaining concurrency limits.
+
+## Follow and Stay
+
+The installer appends `CatFollowStay.lua` to `CatAnimal.lua`. The proxy handles interaction registration and sound variants. The CatAnimal jobs inherit the stock Pet and Feed jobs and wait for a successful result. The player, `animal_01`, exact `cat_animal_01` collection, and completion of `NPC_Renee_ExplainCat` gate the commands.
+
+Feed sets a session mode and a quarter-second timer. The cat starts native reverse steering outside 2.8 units, waits within 1.6 units, and resumes when the player moves away. Pet cancels the timer and holds position with stock idles. The mode suspends while an interaction runs and resumes after cancellation. There is no save field for the mode. Stock saves may still record the cat's location. Castle trigger occupancy updates while commanded, but the completed quest's herd flag stays as it was. The mod clears the command on save reload and does not spawn or move an actor to a different world.
+
+Static native evidence: Lua `StartReverseSteering` (`140373540`) enters `140372960`, which sets steering bits `0x02` and `0x20`. `TurnOffAwareness` (`1403736c0` -> `140372c10`) clears the separate `0x08` awareness flag used by `140372010` to dispatch proximity callbacks. The `140372160` update invokes `140371c50` when steering bit `0x02` is active. That function resolves the target and uses its horizontal direction, reversed toward the target when `0x20` is set. It has no range or time cutoff in that branch. `StopSteering` (`140373600` -> `140372bb0`) clears steering bits and sets requested speed to zero. Stock `cat_animal_01` has `FleeSpeed = 2.0` and `FleeAwarenessDistance = 4.5`. Follow uses this direct steering with the player as target. The cat moves toward the player and remains subject to the game's terrain and collision behavior. Gameplay confirmed Follow, Stay, and normal meow and stretch idles.
+
+## Travelling companion investigation
+
+Buddy and Lyndsay are represented by local character records. In the shipped `attribdb.log`, `animal_buddy` and `animal_linzey` belong to `world:animal_01`, and `cap_buddy` and `cap_linzey` belong to `world:capital_01`. There are also `transition_buddy_animal` and `transition_linzey_animal` records for the boat scene `transition_world_to_renee`. The `Schedule_Animal_*` Lua files register the NPC roles and schedules for that destination. `Boat_Interaction_LeaveIsland.lua` requests the gameplay world change and teleports the player. It does not pass the island actors as passengers. The static evidence supports local instances that represent the same logical characters on different islands.
+
+Ms. Prissykins has a placed herdable on `animal_01`. A comparable implementation would keep one logical companion state, wait for the destination gameplay world to finish loading, and activate exactly one destination cat. It would reuse the placed quest cat at the nature preserve, use a temporary herdable instance elsewhere, and clean it up on departure. The game already spawns a herdable through `Job_SpawnObject` in `Task_Cute_Daniel.lua`, and the credits script spawns `cat_credits` separately. These demonstrate ingredients, not a tested travel implementation. Destination spawn placement, automatic saving of temporary actors, duplicate prevention, interaction registration in non-home worlds, and boat scene behavior still need separate tests. No cross-world changes were made.

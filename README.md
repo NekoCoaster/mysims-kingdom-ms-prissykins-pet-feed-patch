@@ -1,10 +1,10 @@
 # Ms. Prissykins Pet & Feed
 
-Give Ms. Prissykins some attention! Enable **Pet** and **Feed** in MySims Kingdom, with the game's own animations and alternating sound recordings.
+Give Ms. Prissykins some attention in MySims Kingdom. After Renée's tower quest, **Feed** her to invite her along and **Pet** her to ask her to stay. She keeps her original animations and sounds, including her idle meows and stretches.
 
 ![Petting Ms. Prissykins at the top of the tower](docs/images/prissykins-petting-demo.gif)
 
-**[Download v0.2.0](https://github.com/NekoCoaster/mysims-kingdom-ms-prissykins-pet-feed-patch/releases/download/v0.2.0/Prissykins-Petting-0.2.0.zip)**
+**[Download v0.3.0](https://github.com/NekoCoaster/mysims-kingdom-ms-prissykins-pet-feed-patch/releases/download/v0.3.0/Prissykins-Petting-0.3.0.zip)**
 
 For **Windows 64-bit, Steam build 21152538**. The mod checks your game version before enabling its changes.
 
@@ -16,17 +16,26 @@ For **Windows 64-bit, Steam build 21152538**. The mod checks your game version b
 4. Double-click **Install.cmd** in the extracted download and select **MySimsKingdom.exe**. This sets up the game script once and backs up the original.
 5. Start the game normally through Steam, load your save, and approach Ms. Prissykins. Allow a few seconds for **Pet** and **Feed** to appear.
 
-**That's it—no helper window or CMD file to run each time you play.** The mod loads with the game and stops when the game closes. Pet/Feed and sound variation have been confirmed working after the tower quest, including on a second computer.
+The mod loads automatically when you start the game.
 
-### Updating from v0.1.0
+### Updating from v0.2.0
 
-Close the game and copy the new **winmm.dll** beside **MySimsKingdom.exe**. Your existing script setting can stay as it is. Stop using **Enable Petting.cmd** and **Enable Varied Sounds.cmd**; they are no longer needed.
+Close the game, extract the new ZIP, and run **Install.cmd** again. Keep your existing `winmm.dll`.
+
+## Follow and Stay
+
+Finish Renée's tower quest to use these commands:
+
+- **Feed** to have her follow. She waits when she catches up and follows again when you walk away.
+- **Pet** to have her stay where she is. She can still meow, stretch, and idle.
+
+The command applies to the current area and resets when you reload your save.
 
 ## Good to know
 
-- The mod does **not edit your saves** and is not tied to a Steam account. Install it separately on each computer.
+- The mod does **not edit your save files**.
 - If Windows denies access during the one-time script setup, right-click **Install.cmd** and choose **Run as administrator**.
-- If a game update stops it working, check the [release page](https://github.com/NekoCoaster/mysims-kingdom-ms-prissykins-pet-feed-patch/releases). Steam's file verification may also reset the script setting; run **Install.cmd** again if needed.
+- If a game update stops it working, check the [release page](https://github.com/NekoCoaster/mysims-kingdom-ms-prissykins-pet-feed-patch/releases).
 - For troubleshooting, look for **PrissykinsProxy.log** in the game folder. It is refreshed each launch.
 
 ## Uninstall
@@ -35,6 +44,6 @@ Close the game, delete this mod's **winmm.dll** from the game folder, then run *
 
 ## For developers
 
-See [native/README.md](native/README.md) for the DLL build and checks, and [RESEARCH.md](RESEARCH.md) for the investigation. Build the DLL first, then run `Build-Release.ps1` to package it. The older external helper remains in the source repository for reference; it is not included in the v0.2.0 player download.
+See [native/README.md](native/README.md) for the DLL build and [RESEARCH.md](RESEARCH.md) for the implementation notes. Build the DLL first, then run `Build-Release.ps1` to package it.
 
 Unofficial community project, not affiliated with EA. The MIT license covers this project's source code, not the game or its assets.

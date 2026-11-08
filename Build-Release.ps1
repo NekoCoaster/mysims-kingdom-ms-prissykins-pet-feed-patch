@@ -1,8 +1,11 @@
 [CmdletBinding()]
-param([string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'))
+param(
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'),
+    [ValidatePattern('^\d+\.\d+\.\d+(-[a-z0-9-]+)?$')][string]$Version = '0.3.0'
+)
 $ErrorActionPreference = 'Stop'
 $files = @(
-    'README.md', 'LICENSE', 'Install.ps1', 'Install.cmd', 'Uninstall.cmd',
+    'README.md', 'LICENSE', 'Install.ps1', 'Install.cmd', 'Uninstall.cmd', 'CatFollowStay.lua',
     'docs/images/prissykins-petting-demo.gif', 'winmm.dll',
     'third-party/Zig-LICENSE.txt', 'third-party/LLVM-LICENSE.txt', 'third-party/MinGW-COPYING.txt'
 )
@@ -11,7 +14,7 @@ if (-not (Test-Path -LiteralPath $dll)) { throw 'Build the proxy DLL with native
 $header = [IO.File]::ReadAllBytes($dll)
 if ($header[0] -ne 0x4d -or $header[1] -ne 0x5a) { throw 'The proxy is not a Windows binary.' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$zipPath = Join-Path (Resolve-Path -LiteralPath $OutputDirectory).Path 'Prissykins-Petting-0.2.0.zip'
+$zipPath = Join-Path (Resolve-Path -LiteralPath $OutputDirectory).Path "Prissykins-Petting-$Version.zip"
 if (Test-Path -LiteralPath $zipPath) { throw "Release already exists: $zipPath. Choose a fresh output directory." }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::Open($zipPath, 'Create')

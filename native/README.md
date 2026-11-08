@@ -1,6 +1,6 @@
 # Proxy DLL
 
-`winmm.dll` forwards Windows multimedia exports to the original DLL loaded from the Windows system directory. The forwarding manifest includes the 181 named/ordinal exports on the development machine. Compatibility with other Windows versions still requires checking.
+`winmm.dll` forwards Windows multimedia exports to the original DLL loaded from the Windows system directory. The forwarding manifest lists 181 exports by name and ordinal.
 
 Only `MySimsKingdom.exe` with the supported SHA-256 starts the mod worker. Other hosts simply receive forwarding; unsupported game builds log a disabled message and receive forwarding without game-memory changes. The worker waits for a stable cat/island registration, adds the missing interaction handle using existing list capacity, and monitors only the cat's Pet/Feed sound groups. There is no Windows startup item, external resident helper, executable-code patch, or save-file access.
 
@@ -26,7 +26,7 @@ To remove this proxy, close the game and remove only this project's `winmm.dll`.
 
 ## Limits
 
-The registration and sound logic use the validated helper's guarded data edits from an in-process worker. A short stable-state delay reduces startup/transition risk but does not make concurrent game-list mutation race-free. Full-capacity interaction lists are left untouched. Voice polling can miss sounds shorter than the settling interval. The player confirmed automatic loading, interactions, and sound variation on a second computer. Before-quest behavior and island departure/return still need gameplay coverage.
+The registration and sound logic use the helper's guarded data edits from an in-process worker. A short stable-state delay reduces startup/transition risk but does not make concurrent game-list mutation race-free. Full-capacity interaction lists are left untouched. Voice polling can miss sounds shorter than the settling interval. Follow and Stay use the cat script installed alongside the proxy.
 
 ## Checks
 
