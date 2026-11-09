@@ -3,9 +3,46 @@
 #include <stdexcept>
 static void require(bool ok, const char* why) { if(!ok)throw std::runtime_error(why); }
 template<class T> static void put(uintptr_t p,T v) { memcpy((void*)p,&v,sizeof(v)); }
+
+static uintptr_t sourceFlagsAddress;
+static RefSpec* testClone(RefSpec* result, RefSpec* source, const char* name) {
+    require(source->kind == herdablesKey && source->collection == homeCatKey &&
+            strcmp(name, "prissykins_travel_test") == 0, "only the named cat clone is requested");
+    if (value<uint16_t>(sourceFlagsAddress) & cloneableCollection) {
+        *result = {herdablesKey, UINT32_MAX, travelCatKey, UINT32_MAX};
+    }
+    return result;
+}
+static RefSpec* failedClone(RefSpec* result, RefSpec*, const char*) { return result; }
+
 int main() {
     base=(uintptr_t)VirtualAlloc(nullptr,0xaf0000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
     require(base!=0,"fixture allocation");
+    const uintptr_t brokerSlot = base + 0xac98a8;
+    put(brokerSlot - sizeof(uintptr_t), base + 0x927560);
+    put(brokerSlot, base + collectionExistsRva + 1);
+    require(!installTravelBinding() && value<uintptr_t>(brokerSlot) == base + collectionExistsRva + 1,
+            "unexpected broker left unchanged");
+    put(brokerSlot, base + collectionExistsRva);
+    require(installTravelBinding() && value<uintptr_t>(brokerSlot) == (uintptr_t)&travelBinding,
+            "exact broker slot replaced");
+    std::array<unsigned char, 0x24> catRecord{};
+    const auto sourceRecord = (uintptr_t)catRecord.data();
+    sourceFlagsAddress = sourceRecord + 0x10;
+    put(sourceRecord, homeCatKey);
+    put(sourceRecord + 8, herdablesKey);
+    put<uint16_t>(sourceFlagsAddress, serializableCollection);
+    RefSpec visitor{};
+    require(cloneTravelCollection(sourceRecord, testClone, visitor) && visitor.collection == travelCatKey &&
+            value<uint16_t>(sourceFlagsAddress) == serializableCollection,
+            "clone master enabled only during the call");
+    visitor = {};
+    require(!cloneTravelCollection(sourceRecord, failedClone, visitor) &&
+            value<uint16_t>(sourceFlagsAddress) == serializableCollection,
+            "failed clone restores source flags");
+    put(sourceRecord, travelCatKey);
+    require(!cloneTravelCollection(sourceRecord, testClone, visitor) && visitor.collection == 0 &&
+            value<uint16_t>(sourceFlagsAddress) == serializableCollection, "wrong source identity left untouched");
     std::array<unsigned char,0x180> cat{},world{},transform{};
     uintptr_t cp=(uintptr_t)cat.data(),wp=(uintptr_t)world.data(),tp=(uintptr_t)transform.data();
     uint32_t handle=0x12340002;
@@ -47,6 +84,6 @@ int main() {
     voice.playing=15;voice.identity=45;voice.sound=sp+251*56;put(mp+0x68,voice);
     sounds.tick(1200);sounds.tick(1400);require(rows[250].last==1&&rows[253].last==0,"other sounds untouched");
     VirtualFree((void*)base,0,MEM_RELEASE);
-    puts("PASS: registration, duplicate prevention, capacity/identity/island guards, reload registration, sound settling and alternation, unrelated sounds.");
+    puts("PASS: broker slot, scoped clone flag and restoration, registration, duplicate prevention, capacity/identity/island guards, reload registration, sound settling and alternation, unrelated sounds.");
     return 0;
 }

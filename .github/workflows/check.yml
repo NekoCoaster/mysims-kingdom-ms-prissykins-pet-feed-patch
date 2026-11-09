@@ -8,9 +8,6 @@ jobs:
       - name: Compile memory helper
         shell: powershell
         run: Add-Type -Path .\PrissykinsMemory.cs
-      - name: Check installer and restoration
-        shell: powershell
-        run: .\tests\Test-Installer.ps1
       - name: Check sound-cycle tracking
         shell: powershell
         run: .\tests\Test-SoundCycle.ps1
@@ -35,3 +32,10 @@ jobs:
           python native/test_forwarding.py
           if ($LASTEXITCODE -ne 0) { throw 'Forwarding test failed' }
           .\Build-Release.ps1
+      - name: Check packaged installer and restoration
+        shell: powershell
+        run: |
+          $archive = Get-ChildItem -Path .\dist -Filter 'Prissykins-Petting-*.zip' -File
+          $destination = "$env:RUNNER_TEMP/prissykins-package"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $destination
+          .\tests\Test-Installer.ps1 -PackageRoot "$destination/Prissykins-Petting"

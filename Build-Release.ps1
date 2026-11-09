@@ -1,12 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist'),
-    [ValidatePattern('^\d+\.\d+\.\d+(-[a-z0-9-]+)?$')][string]$Version = '0.3.0'
+    [string]$OutputDirectory,
+    [ValidatePattern('^\d+\.\d+\.\d+(-[a-z0-9-]+(\.[a-z0-9-]+)*)?$')][string]$Version = '0.4.0-beta.1'
 )
 $ErrorActionPreference = 'Stop'
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot 'dist' }
 $files = @(
     'README.md', 'LICENSE', 'Install.ps1', 'Install.cmd', 'Uninstall.cmd', 'CatFollowStay.lua',
-    'docs/images/prissykins-petting-demo.gif', 'winmm.dll',
+    'winmm.dll',
     'third-party/Zig-LICENSE.txt', 'third-party/LLVM-LICENSE.txt', 'third-party/MinGW-COPYING.txt'
 )
 $dll = Join-Path $PSScriptRoot 'native/build/winmm.dll'

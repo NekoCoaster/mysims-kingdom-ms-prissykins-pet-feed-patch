@@ -48,9 +48,17 @@ for _, name in ipairs({"Pet", "Feed"}) do
     function stock:Destructor() end
 end
 
-local world = {}
+local world = {isValid = true, collectionKey = "animal_01"}
+local currentWorld = world
 local player = {isValid = true, containingWorld = world}
-Universe = {GetPlayerGameObject = function() return player end, GetWorld = function() return world end}
+Universe = {
+    GetPlayerGameObject = function() return player end,
+    GetWorld = function(_, name) if name == "animal_01" then return world end return currentWorld end,
+}
+Luattrib = {ConvertStringToUserdataKey = function(_, key) return key end}
+Classes.WorldBase = {BeginIslandSimulationCallback = function() end}
+Classes.CharacterBase = {BeginIslandSimulationCallback = function() end}
+Classes.Boat_Interaction_LeaveIsland = {}
 local questComplete = false
 Task = {IsTaskComplete = function(_, task)
     check(task == "NPC_Renee_ExplainCat", "Wrong quest gate")
@@ -128,9 +136,10 @@ local paused = coroutine.create(function() job:Action(player, cat) end)
 local timer = cat.lastTimer
 check(coroutine.resume(paused) and coroutine.status(paused) == "suspended" and not timer.isValid, "Pet did not pause follow while playing")
 job:Destructor()
-check(cat.prissykinsControl.mode == "follow" and cat.lastTimer.isValid, "Canceled Pet failed to restore follow")
+check(cat.prissykinsControl.mode == "stay" and not cat.lastTimer.isValid, "Interrupted Pet reversed Stay")
 
-action("Pet", cat, player)
+action("Feed", cat, player)
+action("Pet", cat, player, {result = BlockingResult.Failed})
 check(cat.prissykinsControl.mode == "stay" and not cat.moving and not cat.lastTimer.isValid, "Pet did not set stay")
 cat:SteeringTargetNearbyCallback()
 cat:SteeringTargetNotNearbyCallback()
@@ -148,3 +157,159 @@ check(cat.prissykinsControl.mode == "stay" and not cat.moving and not cat.lastTi
 cat:LoadCallback()
 check(cat.prissykinsControl == nil and cat.loaded, "Save reload did not restore stock control")
 print("PASS: quest and identity gates, stock interactions, follow and catch-up, cancellation, stay, reload and world boundary.")
+
+local visitorName = "prissykins_travel_test"
+local away = {isValid = true, collectionKey = "capital_01"}
+local third = {isValid = true, collectionKey = "cutesburgh_01"}
+local destination, requested, watcher, visitor
+local prepared, registered, removed, spawned = 0, 0, 0, 0
+local allowSpawn = true
+UI = {SpawnAndBlock = function() return 0, destination end}
+Universe.RequestGameplayWorldChange = function(_, ref) requested = ref end
+Classes.Job_Teleport = {Spawn = function(_, actor, ref)
+    check(actor == player and ref == destination, "Changed stock teleport")
+    return {Execute = function() end}
+end}
+function player:GetPositionRotation() return 5, 2, 8, 0 end
+function player:IsUnderScriptControl() return self.inCutscene end
+Common = {GetRelativePosition = function(_, dx, dz, x, z) return x + dx, z + dz end}
+for _, island in ipairs({world, away, third}) do
+    function island:GetGroundHeight() return 2 end
+end
+for _, island in ipairs({away, third}) do
+    function island:FindGameObject(_, name)
+        check(name == visitorName, "Looked up the original cat on a different island")
+        return visitor and visitor.isValid and visitor.containingWorld == self and visitor or nil
+    end
+end
+function cat:SetPositionRotation(x, y, z)
+    self.arrivalPosition = {x, y, z}
+end
+package = nil -- Retail omits the Lua package library.
+function Luattrib:CollectionExists(kind, key, actor, island, remove)
+    check(kind == "herdables" and key == "prissykins_native_bridge", "Wrong native bridge")
+    if type(actor) == "string" then return 1 end
+    if actor == nil then
+        prepared = prepared + 1
+        return allowSpawn and 1 or nil
+    end
+    check(actor == visitor and island == actor.containingWorld and island ~= world, "Wrong native registration target")
+    if remove == false then removed = removed + 1 else registered = registered + 1 end
+    return 1
+end
+Classes.Job_PerFrameFunctionCallback = {Spawn = function(_, callback)
+    watcher = {callbackFunction = callback, Execute = function() end}
+    return watcher
+end}
+Classes.Job_SpawnObject = {SpawnInWorld = function(_, island, kind, key, parent, x, y, z, rotation, overrides)
+    check(island == currentWorld and parent == island and kind == "herdables" and key == visitorName,
+        "Incorrect transient spawn")
+    check(x == 6.25 and y == 2 and z == 7.25 and rotation == 0 and overrides.ScriptName == "CatAnimal",
+        "Incorrect spawn position or script")
+    spawned = spawned + 1
+    return {
+        SetInitFunction = function(self, callback) self.init = callback end,
+        Execute = function(self)
+            visitor = newCat()
+            visitor.containingWorld = island
+            visitor.collectionKey = visitorName
+            function visitor:Destroy() self:Destructor(); self.isValid = false end
+            visitor:RunnableCallback()
+            self.init(visitor)
+        end,
+    }
+end}
+
+local function depart(island)
+    destination = island and {"world", island.collectionKey}
+    requested = nil
+    watcher = nil
+    Classes.Boat_Interaction_LeaveIsland:Action(player, {})
+    check(requested == destination, "Ferry request changed")
+end
+
+local function arrive(island)
+    currentWorld = island
+    Classes.WorldBase.BeginIslandSimulationCallback(island)
+    local initial = watcher
+    player.containingWorld = island
+    Classes.CharacterBase.BeginIslandSimulationCallback(player)
+    check(initial == watcher, "Duplicate arrival callback queued")
+end
+
+player.containingWorld = world
+action("Feed", cat, player)
+depart(nil)
+check(cat.prissykinsControl.mode == "follow", "Canceling the map changed Follow")
+depart(away)
+check(cat.prissykinsControl.mode == "stay", "Original kept following after ferry departure")
+local departingPlayer = player
+departingPlayer.isValid = false
+player = nil
+currentWorld = away
+Classes.WorldBase.BeginIslandSimulationCallback(away)
+watcher:callbackFunction()
+check(watcher.callbackFunction and spawned == 0, "Arrival canceled when the source player was destroyed")
+player = {
+    isValid = false,
+    containingWorld = world,
+    GetPositionRotation = departingPlayer.GetPositionRotation,
+    IsUnderScriptControl = departingPlayer.IsUnderScriptControl,
+}
+watcher:callbackFunction()
+check(watcher.callbackFunction and spawned == 0, "Arrival did not wait for the new player to become valid")
+player.isValid = true
+watcher:callbackFunction()
+check(watcher.callbackFunction and spawned == 0, "Visitor spawned before the player reached the destination")
+arrive(away)
+player.inCutscene = true
+watcher:callbackFunction()
+check(spawned == 0, "Visitor spawned under script control")
+player.inCutscene = false
+questComplete = false
+watcher:callbackFunction()
+check(watcher.callbackFunction and spawned == 0, "Arrival did not wait for the destination quest state")
+questComplete = true
+watcher:callbackFunction()
+watcher:callbackFunction()
+check(spawned == 1 and prepared == 1 and registered == 1 and watcher.callbackFunction == nil and
+    visitor.prissykinsControl.mode == "follow", "First arrival did not start exactly one visitor")
+action("Pet", visitor, player)
+check(visitor.prissykinsControl.mode == "stay", "Away Pet did not set Stay")
+action("Feed", visitor, player)
+depart(third)
+check(removed == 1 and not visitor.isValid, "Visitor was left on the source island")
+arrive(third)
+watcher:callbackFunction()
+watcher:callbackFunction()
+check(spawned == 2 and registered == 2, "Second arrival did not create exactly one visitor")
+depart(world)
+arrive(world)
+watcher:callbackFunction()
+check(spawned == 2 and removed == 2 and cat.arrivalPosition and cat.prissykinsControl.mode == "follow",
+    "Home arrival did not reuse the original cat")
+action("Pet", cat, player)
+depart(away)
+arrive(away)
+check(watcher == nil, "A cat in Stay mode travelled")
+currentWorld = world
+player.containingWorld = world
+action("Feed", cat, player)
+allowSpawn = false
+depart(away)
+arrive(away)
+watcher:callbackFunction()
+check(spawned == 2 and watcher.callbackFunction == nil, "Spawned without a verified transient record")
+allowSpawn = true
+currentWorld = world
+player.containingWorld = world
+action("Feed", cat, player)
+depart(away)
+arrive(away)
+watcher:callbackFunction()
+watcher:callbackFunction()
+action("Pet", visitor, player)
+depart(third)
+arrive(third)
+check(watcher == nil and removed == 3 and not visitor.isValid, "Away Stay carried a visitor to another island")
+print("PASS: ferry cancellation, source player destruction, destination player replacement and readiness, duplicate callbacks, away Pet/Feed, multi-island handoff, original cat reuse, Stay, and transient guard.")

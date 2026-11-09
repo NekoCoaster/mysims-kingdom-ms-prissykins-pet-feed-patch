@@ -16,6 +16,8 @@ static HMODULE selfModule;
 static volatile LONG workerStarted = 0;
 static HANDLE logFile = INVALID_HANDLE_VALUE;
 static uintptr_t base;
+static bool gameVerified = false;
+static bool travelBound = false;
 
 static void log(const char* message) {
     if (logFile == INVALID_HANDLE_VALUE) return;
@@ -132,6 +134,176 @@ static bool registerTarget(const Target& t) {
     if (value<uintptr_t>(t.vector + 8) != end || value<uint32_t>(before.end) != t.handle) return false;
     log("Pet and Feed registered for Ms. Prissykins."); return true;
 }
+
+static constexpr uint32_t herdablesKey = 0x2c2e0959;
+static constexpr uint32_t homeCatKey = 0x977da888;
+static constexpr uint32_t travelCatKey = 0x3279c724; // prissykins_travel_test
+static constexpr uint32_t worldKey = 0x9b8e862f;
+static constexpr uint32_t homeWorldKey = 0x4036ce55;
+static constexpr uint16_t serializableCollection = 0x01;
+static constexpr uint16_t readOnlyCollection = 0x04;
+static constexpr uint16_t cloneableCollection = 0x20;
+static constexpr uint16_t runtimeCollection = 0x800;
+
+struct RefSpec { uint32_t kind, kindCache, collection, collectionCache; };
+using CloneCollection = RefSpec*(*)(RefSpec*, RefSpec*, const char*);
+
+static bool cloneTravelCollection(uintptr_t sourceRecord, CloneCollection clone, RefSpec& created) {
+    uint16_t flags;
+    const uintptr_t flagsAddress = sourceRecord + 0x10;
+    if (!sourceRecord || value<uint32_t>(sourceRecord) != homeCatKey ||
+        value<uint32_t>(sourceRecord + 8) != herdablesKey || !get(flagsAddress, flags) ||
+        (flags & (serializableCollection | readOnlyCollection | cloneableCollection | runtimeCollection))
+            != serializableCollection) {
+        log("Travel skipped: the original cat collection did not match.");
+        return false;
+    }
+
+    // The native clone routine needs a cloneable ancestor. For this one call,
+    // make the placed cat its own clone template on the Lua game thread.
+    const uint16_t temporary = flags | cloneableCollection;
+    {
+        struct RestoreFlags {
+            uintptr_t address;
+            uint16_t original;
+            ~RestoreFlags() { write(address, &original, sizeof(original)); }
+        } restore{flagsAddress, flags};
+        if (!write(flagsAddress, &temporary, sizeof(temporary))) {
+            log("Travel skipped: could not set the temporary clone flag.");
+            return false;
+        }
+        RefSpec source{herdablesKey, UINT32_MAX, homeCatKey, UINT32_MAX};
+        clone(&created, &source, "prissykins_travel_test");
+    }
+    if (value<uint16_t>(flagsAddress) != flags) {
+        log("Travel skipped: could not restore the original cat collection flags.");
+        return false;
+    }
+    if (created.kind != herdablesKey || created.collection != travelCatKey) {
+        log("Travel skipped: the game did not create the named cat clone.");
+        return false;
+    }
+    return true;
+}
+
+static bool prepareTravelCollection() {
+    RefSpec ref{herdablesKey, UINT32_MAX, travelCatKey, UINT32_MAX};
+    const uintptr_t db = value<uintptr_t>(base + 0xaee208);
+    if (!db) return false;
+    const auto resolveClass = reinterpret_cast<uintptr_t(*)(uintptr_t, RefSpec*)>(base + 0x3302f0);
+    const auto resolveCollection = reinterpret_cast<uintptr_t(*)(uintptr_t, uintptr_t, uint32_t*)>(base + 0x41c780);
+    const uintptr_t kind = resolveClass(db, &ref);
+    if (!kind) return false;
+    uintptr_t collection = resolveCollection(db, kind, &ref.collection);
+    RefSpec created{};
+    if (!collection) {
+        uint32_t sourceKey[2]{homeCatKey, UINT32_MAX};
+        const uintptr_t sourceRecord = resolveCollection(db, kind, sourceKey);
+        const auto clone = reinterpret_cast<CloneCollection>(base + 0x41c220);
+        if (cloneTravelCollection(sourceRecord, clone, created)) {
+            collection = resolveCollection(db, kind, &created.collection);
+        }
+    }
+    uint16_t flags;
+    // Only touch our named runtime clone. Keep SpawnObject from cloning it again,
+    // and exclude its record from world and save-vault serialization.
+    if (collection && value<uint32_t>(collection) == travelCatKey &&
+        value<uint32_t>(collection + 8) == herdablesKey &&
+        value<uint32_t>(collection + 0xc) == homeCatKey && get(collection + 0x10, flags) &&
+        (flags & runtimeCollection) && !(flags & (cloneableCollection | readOnlyCollection))) {
+        const uint16_t transient = flags & ~serializableCollection;
+        if ((flags == transient || write(collection + 0x10, &transient, sizeof(transient))) &&
+            value<uint16_t>(collection + 0x10) == transient) {
+            log("Travelling collection ready; serialization disabled.");
+            return true;
+        }
+    }
+    if (created.kind == herdablesKey && created.collection == travelCatKey) {
+        const auto release = reinterpret_cast<void(*)(RefSpec*)>(base + 0x41ecb0);
+        release(&created);
+    }
+    log("Travel skipped: could not verify a transient cat collection.");
+    return false;
+}
+
+static bool setTravelInteractable(uintptr_t cat, uintptr_t world, bool add) {
+    if (!cat || !world || value<uint32_t>(cat + 0x28) != herdablesKey ||
+        value<uint32_t>(cat + 0x30) != travelCatKey || value<uint32_t>(world + 0x28) != worldKey ||
+        value<uint32_t>(world + 0x30) == homeWorldKey) return false;
+    const auto parent = reinterpret_cast<uintptr_t(*)(uintptr_t)>(base + 0x33ad50);
+    if (parent(cat) != world) return false;
+    const uintptr_t transform = value<uintptr_t>(world + 0x50);
+    const uintptr_t table = value<uintptr_t>(base + 0xae9798);
+    uint32_t handle = value<uint32_t>(cat + 8);
+    const auto slot = static_cast<uint16_t>(handle);
+    if (!transform || !slot || !(handle >> 16) || slot >= value<uint16_t>(base + 0xae97a0) ||
+        value<uintptr_t>(table + slot * sizeof(uintptr_t)) != cat) return false;
+    uint64_t key = value<uint64_t>(base + 0xae9908);
+    if (static_cast<uint32_t>(key) != 0xee4d5fe7) return false;
+
+    // Stock helpers maintain sorted handles and allocate a missing filter on
+    // demand. Lua invokes them on the game thread, outside the proxy worker.
+    const auto edit = reinterpret_cast<void(*)(uintptr_t, uint32_t*, uint64_t*)>(
+        base + (add ? 0x33ca80 : 0x33cf60));
+    edit(transform + 0x88, &handle, &key);
+    if (add) log("Pet and Feed registered for the travelling Ms. Prissykins.");
+    return true;
+}
+
+static constexpr uintptr_t collectionExistsRva = 0x496da0;
+
+// Retail initializes its own Lua libraries and omits package.loadlib. Reserve
+// a private request on the Luattrib broker and forward every stock query.
+static int travelBinding(void* lua) {
+    const auto getTop = reinterpret_cast<int(*)(void*)>(base + 0x27b060);
+    const auto type = reinterpret_cast<int(*)(void*, int)>(base + 0x27c670);
+    const auto stringAt = reinterpret_cast<const char*(*)(void*, int, size_t*)>(base + 0x27c420);
+    const auto original = reinterpret_cast<int(*)(void*)>(base + collectionExistsRva);
+    const int argc = getTop(lua);
+    if (argc < 3 || type(lua, 2) != 4 || type(lua, 3) != 4) return original(lua);
+    size_t kindLength, keyLength;
+    const char* kind = stringAt(lua, 2, &kindLength);
+    const char* key = stringAt(lua, 3, &keyLength);
+    static constexpr char bridgeKey[] = "prissykins_native_bridge";
+    if (kindLength != sizeof("herdables") - 1 || memcmp(kind, "herdables", kindLength) ||
+        keyLength != sizeof(bridgeKey) - 1 || memcmp(key, bridgeKey, keyLength)) return original(lua);
+
+    bool ok = false;
+    if (argc == 3) {
+        ok = prepareTravelCollection();
+    } else if (argc == 4 && type(lua, 4) == 4) {
+        size_t length;
+        const char* stage = stringAt(lua, 4, &length);
+        char message[160];
+        snprintf(message, sizeof(message), "Travel: %.*s", (int)(std::min)(length, size_t{128}), stage);
+        log(message);
+        ok = true;
+    } else if (argc == 5 || argc == 6) {
+        const auto getObject = reinterpret_cast<uintptr_t(*)(void*, int)>(base + 0x3c6e00);
+        const uintptr_t cat = getObject(lua, 4);
+        const uintptr_t world = getObject(lua, 5);
+        ok = setTravelInteractable(cat, world, argc == 5);
+        if (!ok) log("Travel: interaction filter rejected the cat or world.");
+    }
+    if (!ok) return 0;
+    const auto pushInteger = reinterpret_cast<void(*)(void*, intptr_t)>(base + 0x27b7e0);
+    pushInteger(lua, 1);
+    return 1;
+}
+
+static bool installTravelBinding() {
+    const uintptr_t slot = base + 0xac98a8;
+    const uintptr_t original = base + collectionExistsRva;
+    if (value<uintptr_t>(slot - sizeof(uintptr_t)) != base + 0x927560 ||
+        value<uintptr_t>(slot) != original) return false;
+    DWORD oldProtection;
+    if (!VirtualProtect((void*)slot, sizeof(uintptr_t), PAGE_READWRITE, &oldProtection)) return false;
+    const auto replaced = InterlockedCompareExchangePointer(
+        (void* volatile*)slot, (void*)&travelBinding, (void*)original);
+    DWORD ignored;
+    VirtualProtect((void*)slot, sizeof(uintptr_t), oldProtection, &ignored);
+    return replaced == (void*)original;
+}
 struct SoundRow { uint32_t key, bank, count; int32_t last; };
 struct Voice { uint32_t playing, pad; uintptr_t sound; uint64_t owner, identity; };
 struct Seen { uint64_t identity{}, since{}; bool handled{}; };
@@ -193,13 +365,13 @@ static DWORD WINAPI worker(void*) {
     if (!tail || tail-logPath + 22 >= MAX_PATH) return 0;
     wcscpy(tail+1,L"PrissykinsProxy.log");
     logFile=CreateFileW(logPath,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-    log("Proxy loaded; validating game version.");
-    if (!supported(path)) { log("Unsupported executable: mod disabled; system WinMM forwarding remains active."); if(logFile!=INVALID_HANDLE_VALUE)CloseHandle(logFile); logFile=INVALID_HANDLE_VALUE; return 0; }
+    log("Proxy loaded.");
+    if (!gameVerified) { log("Unsupported executable: mod disabled; system WinMM forwarding remains active."); if(logFile!=INVALID_HANDLE_VALUE)CloseHandle(logFile); logFile=INVALID_HANDLE_VALUE; return 0; }
     // Static game imports normally retain this DLL. Pin it explicitly so a loader
     // cannot unload worker code while it is in use. It dies with the game process.
     HMODULE pinned;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,(LPCWSTR)&worker,&pinned)) return 0;
-    base=(uintptr_t)GetModuleHandleW(nullptr);
+    log(travelBound ? "Travel broker bound." : "Travel disabled: the broker entry did not match.");
     wchar_t mutexName[96]; swprintf(mutexName,96,L"Local\\PrissykinsSoundVariation-%lu",GetCurrentProcessId());
     HANDLE mutex=CreateMutexW(nullptr,TRUE,mutexName);
     bool ownSounds=mutex && GetLastError()!=ERROR_ALREADY_EXISTS;
@@ -232,6 +404,11 @@ static BOOL CALLBACK loadOriginal(PINIT_ONCE, PVOID, PVOID*) {
     wcscat(path,L"\\winmm.dll");
     HMODULE original=LoadLibraryExW(path,nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!original || original==selfModule) return FALSE;
+    if (gamePath(path)) {
+        base = (uintptr_t)GetModuleHandleW(nullptr);
+        gameVerified = supported(path);
+        if (gameVerified) travelBound = installTravelBinding();
+    }
     for(unsigned i=0;i<ExportCount;++i) {
         FARPROC p=GetProcAddress(original,ExportNames[i] ? ExportNames[i] : MAKEINTRESOURCEA(ExportOrdinals[i]));
         InterlockedExchangePointer((void* volatile*)&g_targets[i],(void*)p);

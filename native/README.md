@@ -6,6 +6,8 @@ Only `MySimsKingdom.exe` with the supported SHA-256 starts the mod worker. Other
 
 The game-folder `PrissykinsProxy.log` is replaced each launch. It records version acceptance, registration, and sound preparation. The DLL remains loaded until the game exits. The previous one-time `CatAnimal.lua` setting is still needed to permit interactions when she is not herded.
 
+The portable travel test uses a private request through the game's `Luattrib:CollectionExists` broker. The proxy verifies the executable hash and the stock broker entry before binding the private request. The matching Lua script uses it on the game thread to prepare the transient collection and manage its interaction handle. Use the DLL and script from the same ZIP.
+
 ## Build
 
 Use the official Zig 0.15.2 Windows x64 toolchain (download and SHA-256 from https://ziglang.org/download/index.json):
